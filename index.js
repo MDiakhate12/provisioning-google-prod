@@ -64,9 +64,9 @@ app.post("/", async (req, res) => {
                         createTerraformVariableFile("frontend", req.body, resourceName, data)
 
                         executeTerraform("frontend", resourceName)
-                            .then(() => {
+                            .then(async () => {
                                 // Get VM Instances
-                                let newVMs = getInstances(instanceGroupName)
+                                let newVMs = await getInstances(instanceGroupName)
 
                                 // Export the generated terraform directory to template registry
                                 uploadFiles(folders, projectName, instanceGroupName, timestamp)
@@ -178,16 +178,15 @@ const uploadFiles = async (folders, projectName, instanceGroupName, timestamp) =
     }
 }
 
-const getInstances = (prefix) => {
+const getInstances = async (prefix) => {
     const compute = new Compute()
-
     return compute
         .getVMs({ filter: `name eq ^${prefix}.*` })
         .then(data => {
             let vms = data[0].map(element => element.metadata)
             let newVMs = vms.map(({ name }) => ({ name }))
 
-            console.log(newVMs)
+            // console.log(newVMs)
 
             return newVMs;
         })
@@ -263,7 +262,7 @@ const executeTerraform = async (folders, resourceName) => {
 
                 // Log output
                 if (stderr) console.log(`stderr: ${stderr}`)
-                if (stdout) console.log(`stdout: ${stdout}`) 
+                if (stdout) console.log(`stdout: ${stdout}`)
             })
             .catch(error => {
                 console.error(error)
