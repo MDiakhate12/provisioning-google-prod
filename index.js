@@ -8,6 +8,8 @@ const exec = util.promisify(require('child_process').exec);
 
 const PORT = process.env.PORT || 4000;
 const WAIT_BEFORE_EXECUTE = 6000; // wait 6 seconds
+const DEFAULT_TIMEOUT = 1000 * 60 * 10 // 10 minutes
+
 
 const app = express()
 
@@ -31,6 +33,9 @@ app.use(cors())
 app.use(express.json())
 
 app.post("/", async (req, res) => {
+    req.setTimeout(DEFAULT_TIMEOUT)
+    res.setTimeout(DEFAULT_TIMEOUT)
+    // return res.send(await getRules())
     try {
 
         const {
@@ -65,12 +70,15 @@ app.post("/", async (req, res) => {
 
                         executeTerraform("frontend", resourceName)
                             .then(async () => {
-                                // Get VM Instances
-                                let newVMs = await getInstances(instanceGroupName)
-
                                 // Export the generated terraform directory to template registry
                                 uploadFiles(folders, projectName, instanceGroupName, timestamp)
-                                res.send(newVMs)
+
+                                // Get VM Instances
+                                getRules(instanceGroupName)
+                                    .then(loadBalancers => {
+                                        console.log(loadBalancers)
+                                        res.send(loadBalancers)
+                                    }).catch(console.error)
                             })
                             .catch((error) => { console.error(error); res.status(500).send("Error during creation.") })
                     })
@@ -124,15 +132,15 @@ const uploadFiles = async (folders, projectName, instanceGroupName, timestamp) =
             files.forEach(file => {
                 if (!fs.statSync(`${path}/${file}`).isDirectory()) {
                     let folders = path.substring(path.lastIndexOf("/") + 1)
-                    let destination = `${instanceGroupName}-${projectName.replace(/ /g, '-').trim().toLowerCase()}-${timestamp}/${folders}/${file}`
+                    let destination = `${instanceGroupName}-${timestamp}/${folders}/${file}`
                     storage
                         .bucket(templateRegistry)
                         .upload(`${path}/${file}`, { destination })
                         .then(async (uploadedFile) => {
                             console.log(`${file} uploaded successfuly`)
                             // exec(`rm -rf ${path}/${file}`)
-                            // .then((() => console.log(`Deleted ${file}.`)))
-                            // .catch(console.error)
+                            //     .then((() => console.log(`Deleted ${file}.`)))
+                            //     .catch(console.error)
                         })
                         .catch(console.error)
                 }
@@ -157,15 +165,15 @@ const uploadFiles = async (folders, projectName, instanceGroupName, timestamp) =
                 files.forEach(file => {
                     if (!fs.statSync(`${path}/${file}`).isDirectory()) {
                         let folder = path.substring(path.lastIndexOf("/") + 1)
-                        let destination = `${instanceGroupName}-${projectName.replace(/ /g, '-').trim().toLowerCase()}-${timestamp}/${folder}/${file}`
+                        let destination = `${instanceGroupName}-${timestamp}/${folder}/${file}`
                         storage
                             .bucket(templateRegistry)
                             .upload(`${path}/${file}`, { destination })
                             .then(async (uploadedFile) => {
                                 console.log(`${file} uploaded successfuly`)
                                 // exec(`rm -rf ${path}/${file}`)
-                                // .then((() => console.log(`Deleted ${file}.`)))
-                                // .catch(console.error)
+                                //     .then((() => console.log(`Deleted ${file}.`)))
+                                //     .catch(console.error)
                             })
                             .catch(console.error)
                     }
@@ -183,14 +191,36 @@ const getInstances = async (prefix) => {
     return compute
         .getVMs({ filter: `name eq ^${prefix}.*` })
         .then(data => {
+
             let vms = data[0].map(element => element.metadata)
-            let newVMs = vms.map(({ name }) => ({ name }))
+            let newVMs = vms.map(({ name, networkInterfaces }) => ({
+                name,
+                publicIP: networkInterfaces[0].accessConfigs[0].natIP,
+                privateIP: networkInterfaces[0].networkIP
+            }))
 
             // console.log(newVMs)
 
             return newVMs;
         })
         .catch(console.error)
+}
+
+const getRules = async () => {
+    return exec('gcloud compute forwarding-rules list --format json')
+        .then(async ({ stdout, stderr, error }) => {
+            if (error) { console.error(error); return }
+
+            // Log output
+            if (stderr) { console.log(`stderr${stderr}`); return }
+            let rules = JSON.parse(stdout)
+            let loadBalancers = rules.map(({ name, IPAddress, loadBalancingScheme }) => ({ name, IPAddress, loadBalancingScheme }))
+            return loadBalancers
+        })
+        .catch(error => {
+            console.error(error)
+            return
+        })
 }
 
 const createTerraformVariableFile = async (folder, body, resourceName, frontend_react_app_backend_url = '') => {
@@ -247,11 +277,6 @@ const createTerraformVariableFile = async (folder, body, resourceName, frontend_
 }
 
 const executeTerraform = async (folders, resourceName) => {
-    console.log(typeof folders)
-    console.log(`STRING ${folders instanceof String}`)
-    console.log(`ARRAY ${folders instanceof Array}`)
-    console.log(`OBJECT ${folders instanceof Object}`)
-
 
     if (typeof folders === "string") {
         return exec(`make terraform-apply-${folders} RESOURCE_NAME=${resourceName}`)
@@ -291,6 +316,8 @@ const executeTerraform = async (folders, resourceName) => {
 
 }
 
-app.listen(PORT, () => {
+let server = app.listen(PORT, () => {
     console.log('Listenning on port: ', PORT)
 })
+
+server.timeout = DEFAULT_TIMEOUT // 10 minutes before socket hang up
