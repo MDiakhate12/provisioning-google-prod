@@ -34,14 +34,14 @@ app.post("/", async (req, res) => {
       "terraform/google/prod/frontend.template",
       "terraform/google/prod/variables.tf",
     ];
-  
+
     let backend = [
       "terraform/google/prod/backend.template",
       "terraform/google/prod/variables.tf",
     ];
-  
+
     let modules = {};
-  
+
     switch (stack) {
       case "mern":
         modules = {
@@ -49,21 +49,21 @@ app.post("/", async (req, res) => {
           backend: "modules/nodejs/prod/init-nodejs.tpl",
         };
         break;
-  
+
       case "sbam":
         modules = {
           frontend: "modules/angular/prod/init-angular.tpl",
           backend: "modules/springboot/prod/init-springboot.tpl",
         };
         break;
-  
+
       default:
         break;
     }
-  
-    frontend.push(modules.frontend)
-    backend.push(modules.backend)
-    
+
+    frontend.push(modules.frontend);
+    backend.push(modules.backend);
+
     // Replace hyphens by underscores
     // let resourceName = instanceGroupName
     //   .replace(/-/g, "_")
@@ -80,7 +80,7 @@ app.post("/", async (req, res) => {
 
     // Wait 3 seconds for the dowload
     setTimeout(() => {
-      createTerraformVariableFile("backend", req.body, modules, '');
+      createTerraformVariableFile("backend", req.body, modules, "");
 
       executeTerraform("backend", instanceGroupName)
         .then(() => {
@@ -248,14 +248,11 @@ const getRules = async (instanceGroupName) => {
         return;
       }
       let rules = JSON.parse(stdout);
-      let loadBalancers = rules.map(
-        ({ name, IPAddress, loadBalancingScheme }) => ({
-          name,
-          IPAddress,
-          loadBalancingScheme,
-        })
-      );
-      return loadBalancers;
+      return rules.map(({ name, IPAddress, loadBalancingScheme }) => ({
+        name,
+        IPAddress,
+        loadBalancingScheme,
+      }));
     })
     .catch((error) => {
       console.error(error);
@@ -267,7 +264,7 @@ const createTerraformVariableFile = async (
   folder,
   body,
   modules,
-  backend_url = "",
+  backend_url = ""
 ) => {
   const {
     numberOfVm,
@@ -297,7 +294,7 @@ const createTerraformVariableFile = async (
       backend_url: "",
       dotenv: ".env",
     },
-    backend:{}
+    backend: {},
   };
 
   if (process.env.USER) {
@@ -305,8 +302,8 @@ const createTerraformVariableFile = async (
   }
 
   for (let [key, value] of Object.entries(modules)) {
-    instance[key]["name"] = getName(value) 
-    instance[key]["path"] = getPath(value) 
+    instance[key]["name"] = getName(value);
+    instance[key]["path"] = getPath(value);
   }
 
   for (let [key, value] of Object.entries(frontendOptions)) {
@@ -326,7 +323,13 @@ const createTerraformVariableFile = async (
   }
 
   if (backend_url !== "") {
-    instance["frontend"]["backend_url"] = backend_url;
+    instance["frontend"]["backend_url"] = !(
+      backend_url.startsWith("http") || backend_url.startsWith("https")
+    )
+      ? `http://${backend_url}`
+      : backend_url;
+
+    console.log(instance["frontend"]["backend_url"]);
   }
 
   if (process.env.KEY_LOCATION) {
