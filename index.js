@@ -323,11 +323,12 @@ const createTerraformVariableFile = async (
   }
 
   if (backend_url !== "") {
+    let url = backend_url.replace(/^(?=\n)$|^\s*|\s*$|\n\n+|\n|\r|\"/gm,"").trim();
     instance["frontend"]["backend_url"] = !(
-      backend_url.startsWith("http") || backend_url.startsWith("https")
+      url.startsWith("http") || url.startsWith("https")
     )
-      ? `http://${backend_url}`
-      : backend_url;
+      ? `http://${url}`.replace(/^(?=\n)$|^\s*|\s*$|\n\n+|\n|\r|\"/gm,"").trim()
+      : url.replace(/^(?=\n)$|^\s*|\s*$|\n\n+|\n|\r|\"/gm,"").trim()
 
     console.log(instance["frontend"]["backend_url"]);
   }
