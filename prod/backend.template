@@ -1,0 +1,155 @@
+provider "google" {
+  project = var.project_id
+  version = "~> 3.59"
+}
+
+// INTANCE TEMPLATE
+resource "google_compute_instance_template" "RESOURCE_NAME_instance_template" {
+  name_prefix  = "${var.vm_group_name}-backend-"
+  machine_type = "custom-${var.cpu}-${var.memory}"
+  region       = var.region
+
+  metadata_startup_script = templatefile(var.backend.path,
+      {
+        PROJECT_NAME       = var.backend.project_name
+        PROJECT_REPOSITORY = var.backend.project_repository
+        PORT               = var.backend.port
+        DB_URI             = var.backend.db_uri
+        MAIN_FILE          = var.backend.main_file
+      } 
+  )
+
+
+  // boot disk
+  disk {
+    source_image = "${var.image_project}/${var.image_family}"
+    disk_size_gb = var.disk_size_gb
+    auto_delete  = true
+    boot         = true
+  }
+
+  // networking
+  network_interface {
+    network = "default"
+    access_config {}
+  }
+
+  tags = ["http-server", "https-server", "web", "backend", "nodejs", "prod"]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+// MANAGED INSTANCE GROUP
+resource "google_compute_instance_group_manager" "RESOURCE_NAME_instance_group" {
+  name               = "${var.vm_group_name}-backend"
+  base_instance_name = "${var.vm_group_name}-backend"
+  zone               = var.zone
+
+  // target_size        = 1
+  // wait_for_instances = true
+
+  version {
+    instance_template = google_compute_instance_template.RESOURCE_NAME_instance_template.id
+  }
+
+  named_port {
+    name = "http"
+    port = 80
+  }
+}
+
+// AUTOSCALER
+resource "google_compute_autoscaler" "RESOURCE_NAME_autoscaler" {
+  name   = "${var.vm_group_name}-backend"
+  zone   = var.zone
+  target = google_compute_instance_group_manager.RESOURCE_NAME_instance_group.id
+
+  autoscaling_policy {
+    max_replicas    = 2
+    min_replicas    = 1
+    cooldown_period = 60
+
+    cpu_utilization {
+      target = 0.8
+    }
+  }
+}
+
+// LOAD BALANCER
+module "gce-lb-http" {
+  source  = "GoogleCloudPlatform/lb-http/google"
+  version = "~> 4.4"
+
+  project = var.project_id
+  name    = "${var.vm_group_name}-backend"
+
+  target_tags = ["backend", "nodejs"]
+
+  backends = {
+    default = {
+      description            = null
+      protocol               = "HTTP"
+      port                   = 80
+      port_name              = "http"
+      timeout_sec            = 10
+      enable_cdn             = false
+      custom_request_headers = null
+      security_policy        = null
+
+      connection_draining_timeout_sec = null
+      session_affinity                = null
+      affinity_cookie_ttl_sec         = null
+
+      health_check = {
+        check_interval_sec  = null
+        timeout_sec         = null
+        healthy_threshold   = null
+        unhealthy_threshold = null
+        request_path        = "/"
+        port                = 80
+        host                = null
+        logging             = null
+      }
+
+      log_config = {
+        enable      = true
+        sample_rate = 1.0
+      }
+
+      groups = [
+        {
+          # Each node pool instance group should be added to the backend.
+          group                        = google_compute_instance_group_manager.RESOURCE_NAME_instance_group.instance_group
+          balancing_mode               = null
+          capacity_scaler              = null
+          description                  = null
+          max_connections              = null
+          max_connections_per_instance = null
+          max_connections_per_endpoint = null
+          max_rate                     = null
+          max_rate_per_instance        = null
+          max_rate_per_endpoint        = null
+          max_utilization              = null
+        },
+      ]
+
+      iap_config = {
+        enable               = false
+        oauth2_client_id     = null
+        oauth2_client_secret = null
+      }
+    }
+  }
+}
+
+resource "null_resource" "ip" {
+  provisioner "local-exec" {
+    command = "echo ${module.gce-lb-http.external_ip} > ip"
+  }
+}
+
+output "RESOURCE_NAME-load-balancer-ip" {
+  value = module.gce-lb-http.external_ip
+}
